@@ -2,11 +2,12 @@
 // Scans uploads/sermons/PredigtDerWoche/<YEAR>/<MONTH> from start-at through
 // the current month. Call with ?key=SECRET&start-at=YYYY-MM.
 // Add &dryrun=1 to preview without creating or changing sermons.
+// Date, preacher, and title may be separated by underscores or hyphens.
 
 $uploads_subdir = 'sermons/PredigtDerWoche';
 $post_type = 'wpfc_sermon';
 $default_post_status = 'draft';
-$default_author = 1;
+$default_author = 10;
 $post_time = '10:30:00';
 $minimum_start_at = '2020-01';
 $dry_run_value = isset($_GET['dryrun']) && is_scalar($_GET['dryrun'])
@@ -78,7 +79,13 @@ if (!hash_equals($secret_key, $provided_key)) {
 
 $upload_dir = wp_get_upload_dir();
 $target_dir_base = rtrim($upload_dir['basedir'], '/\\') . '/' . trim($uploads_subdir, '/\\');
-$target_url_base = rtrim($upload_dir['baseurl'], '/') . '/' . trim($uploads_subdir, '/');
+$uploads_url_path = parse_url($upload_dir['baseurl'], PHP_URL_PATH);
+if (!is_string($uploads_url_path) || $uploads_url_path === '') {
+    http_response_code(500);
+    echo 'Could not determine the WordPress uploads URL path.';
+    exit;
+}
+$target_url_base = rtrim($uploads_url_path, '/') . '/' . trim($uploads_subdir, '/');
 
 if (!is_dir($target_dir_base)) {
     http_response_code(404);
@@ -103,25 +110,22 @@ while ($iter <= $now_dt) {
 }
 
 function sermon_import_normalize_name($name) {
-    $name = str_replace(array('-', '_'), ' ', $name);
+    $original_name = (string) $name;
+    $name = preg_replace('/[^\p{L}\p{N}]+/u', ' ', $original_name);
+    if ($name === null) {
+        $name = preg_replace('/[^a-z0-9]+/i', ' ', $original_name);
+    }
     $name = preg_replace('/\s+/', ' ', trim($name));
     return function_exists('mb_strtolower') ? mb_strtolower($name, 'UTF-8') : strtolower($name);
 }
 
-function sermon_import_find_preacher_id($preacher_name) {
-    $terms = get_terms(array(
-        'taxonomy' => 'wpfc_preacher',
-        'hide_empty' => false,
-    ));
-    if (is_wp_error($terms)) {
-        return $terms;
-    }
-
+function sermon_import_find_preacher_id($preacher_name, $terms) {
     $wanted_name = sermon_import_normalize_name($preacher_name);
     $partial_matches = array();
     foreach ($terms as $term) {
         $term_name = sermon_import_normalize_name($term->name);
-        if ($term_name === $wanted_name) {
+        $term_core_name = preg_replace('/\s*\([^)]*\)/', '', $term_name);
+        if ($term_name === $wanted_name || $term_core_name === $wanted_name) {
             return array(
                 'term_id' => (int) $term->term_id,
                 'name' => $term->name,
@@ -129,7 +133,10 @@ function sermon_import_find_preacher_id($preacher_name) {
                 'candidates' => array($term->name),
             );
         }
-        if ($wanted_name !== '' && strpos($term_name, $wanted_name) !== false) {
+        if (
+            $wanted_name !== '' &&
+            strpos(' ' . $term_core_name . ' ', ' ' . $wanted_name . ' ') !== false
+        ) {
             $partial_matches[] = $term;
         }
     }
@@ -152,6 +159,62 @@ function sermon_import_find_preacher_id($preacher_name) {
         'name' => '',
         'match' => count($partial_matches) > 1 ? 'ambiguous' : 'not_found',
         'candidates' => $candidates,
+    );
+}
+
+function sermon_import_parse_filename($filename, $preacher_terms) {
+    if (!preg_match('/^(\d{4}-\d{2}-\d{2})([_-])(.+)\.mp3$/i', $filename, $matches)) {
+        return false;
+    }
+
+    $date = DateTime::createFromFormat('!Y-m-d', $matches[1]);
+    $date_errors = DateTime::getLastErrors();
+    if (
+        !$date ||
+        ($date_errors !== false && ($date_errors['warning_count'] || $date_errors['error_count'])) ||
+        $date->format('Y-m-d') !== $matches[1]
+    ) {
+        return array('error' => 'invalid_sermon_date');
+    }
+
+    // Both separators are accepted between date, preacher, and title.
+    $name_parts = preg_split('/[-_]+/', $matches[3], -1, PREG_SPLIT_NO_EMPTY);
+    if (count($name_parts) < 2) {
+        return array('error' => 'filename_format_mismatch');
+    }
+
+    $best_match = null;
+    $best_part_count = 0;
+    for ($part_count = 1; $part_count < count($name_parts); $part_count++) {
+        $candidate_name = implode(' ', array_slice($name_parts, 0, $part_count));
+        $match = sermon_import_find_preacher_id($candidate_name, $preacher_terms);
+        if ($match['match'] !== 'not_found') {
+            $best_match = $match;
+            $best_part_count = $part_count;
+        }
+    }
+
+    if ($best_match === null) {
+        $best_part_count = 1;
+        $best_match = array(
+            'term_id' => 0,
+            'name' => '',
+            'match' => 'not_found',
+            'candidates' => array(),
+        );
+    }
+
+    $title_parts = array_slice($name_parts, $best_part_count);
+    if (empty($title_parts)) {
+        return array('error' => 'filename_missing_sermon_title');
+    }
+
+    return array(
+        'date' => $date,
+        'date_separator' => $matches[2],
+        'preacher_name' => implode(' ', array_slice($name_parts, 0, $best_part_count)),
+        'title' => trim(preg_replace('/\s+/', ' ', implode(' ', $title_parts))),
+        'preacher_match' => $best_match,
     );
 }
 
@@ -329,7 +392,7 @@ function sermon_import_load_existing_sermons($requested_post_type, $start_dt, $n
     return $sermons;
 }
 
-function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skipped, &$errors, &$debug_log, $existing_sermons, $uploads_subdir, $post_type, $post_status, $author, $post_time, $dry_run, $debug) {
+function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skipped, &$errors, &$debug_log, $existing_sermons, $preacher_terms, $uploads_subdir, $post_type, $post_status, $author, $post_time, $dry_run, $debug) {
     $sermon_post_type = 'wpfc_sermon';
     $mp3_files = glob(rtrim($dirpath, '/\\') . '/*.mp3');
     if ($mp3_files === false) {
@@ -339,26 +402,45 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
 
     foreach ($mp3_files as $file_path) {
         $filename = basename($file_path);
-        if (!preg_match('/^(\d{4}-\d{2}-\d{2})_([^_]+)_(.+)\.mp3$/i', $filename, $matches)) {
-            $skipped[] = array('file' => $filename, 'reason' => 'filename_format_mismatch');
+        $parsed_filename = sermon_import_parse_filename($filename, $preacher_terms);
+        if ($parsed_filename === false || isset($parsed_filename['error'])) {
+            $skipped[] = array(
+                'file' => $filename,
+                'reason' => $parsed_filename === false ? 'filename_format_mismatch' : $parsed_filename['error'],
+            );
             continue;
         }
 
-        $sermon_date = DateTime::createFromFormat('!Y-m-d', $matches[1]);
-        $date_errors = DateTime::getLastErrors();
-        if (
-            !$sermon_date ||
-            ($date_errors !== false && ($date_errors['warning_count'] || $date_errors['error_count'])) ||
-            $sermon_date->format('Y-m-d') !== $matches[1]
-        ) {
-            $skipped[] = array('file' => $filename, 'reason' => 'invalid_sermon_date');
-            continue;
-        }
-
-        $preacher_name = str_replace('-', ' ', $matches[2]);
-        $title = preg_replace('/[-_]+/', ' ', $matches[3]);
-        $title = trim(preg_replace('/\s+/', ' ', $title));
+        $sermon_date = $parsed_filename['date'];
+        $preacher_name = $parsed_filename['preacher_name'];
+        $title = $parsed_filename['title'];
+        $preacher_match = $parsed_filename['preacher_match'];
         $file_url = rtrim($dirurl, '/') . '/' . rawurlencode($filename);
+        $file_issues = array();
+        if ($preacher_match['match'] === 'not_found') {
+            $file_issues[] = 'Preacher was not found; no preacher term will be assigned.';
+        } elseif ($preacher_match['match'] === 'ambiguous') {
+            $file_issues[] = 'Preacher match is ambiguous; no preacher term will be assigned.';
+        } elseif ($preacher_match['match'] === 'partial') {
+            $file_issues[] = 'Preacher was assigned by partial-name match.';
+        }
+        if ($parsed_filename['date_separator'] === '-') {
+            $file_issues[] = 'Nonstandard hyphen used between date and filename fields.';
+        }
+        if (!is_readable($file_path)) {
+            $file_issues[] = 'MP3 file is not readable by PHP.';
+        } elseif (filesize($file_path) === 0) {
+            $file_issues[] = 'MP3 file is empty.';
+        }
+        if (!post_type_exists($sermon_post_type)) {
+            $file_issues[] = 'Sermon post type is not registered.';
+        }
+        if (!get_userdata($author)) {
+            $file_issues[] = 'Configured author user does not exist.';
+        }
+        if (!taxonomy_exists('wpfc_service_type') || !term_exists(594, 'wpfc_service_type')) {
+            $file_issues[] = 'Service type term 594 is missing or unavailable.';
+        }
 
         $existing_post_id = 0;
         $expected_audio_path = sermon_import_normalize_audio_path($file_url, $uploads_subdir);
@@ -405,11 +487,6 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
         }
 
         $post_date = $sermon_date->format('Y-m-d') . ' ' . $post_time;
-        $preacher_match = sermon_import_find_preacher_id($preacher_name);
-        if (is_wp_error($preacher_match)) {
-            $errors[] = array('file' => $filename, 'reason' => 'failed_to_load_preacher_terms');
-            continue;
-        }
         $preacher_id = $preacher_match['term_id'];
 
         if ($dry_run) {
@@ -424,6 +501,7 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
                 'audio_url' => $file_url,
                 'status' => $post_status,
                 'post_type' => $sermon_post_type,
+                'issues' => $file_issues,
             );
             continue;
         }
@@ -483,6 +561,7 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
             update_post_meta($post_id, $meta_key, $meta_value);
             $saved_value = get_post_meta($post_id, $meta_key, true);
             if ((string) $saved_value !== (string) $meta_value) {
+                $file_issues[] = 'Failed to save metadata field ' . $meta_key . '.';
                 $errors[] = array(
                     'file' => $filename,
                     'reason' => 'failed_to_save_meta_' . $meta_key,
@@ -492,11 +571,13 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
 
         $service_result = wp_set_object_terms($post_id, array(594), 'wpfc_service_type');
         if (is_wp_error($service_result)) {
+            $file_issues[] = 'Could not assign the service type.';
             $errors[] = array('file' => $filename, 'reason' => 'failed_to_assign_service_type: ' . $service_result->get_error_message());
         }
         if ($preacher_id) {
             $preacher_result = wp_set_object_terms($post_id, array($preacher_id), 'wpfc_preacher');
             if (is_wp_error($preacher_result)) {
+                $file_issues[] = 'Could not assign the matched preacher.';
                 $errors[] = array('file' => $filename, 'reason' => 'failed_to_assign_preacher: ' . $preacher_result->get_error_message());
             }
         } elseif ($preacher_match['match'] === 'ambiguous') {
@@ -514,6 +595,7 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
             'preacher_match' => $preacher_match['match'],
             'matched_preacher' => $preacher_match['name'],
             'preacher_candidates' => $preacher_match['candidates'],
+            'issues' => $file_issues,
         );
     }
 
@@ -532,6 +614,15 @@ if (is_wp_error($existing_sermons)) {
     echo sermon_import_escape($existing_sermons->get_error_message());
     exit;
 }
+$preacher_terms = get_terms(array(
+    'taxonomy' => 'wpfc_preacher',
+    'hide_empty' => false,
+));
+if (is_wp_error($preacher_terms)) {
+    http_response_code(500);
+    echo 'Could not load preacher terms: ' . sermon_import_escape($preacher_terms->get_error_message());
+    exit;
+}
 foreach ($month_dirs as $month_dir) {
     $total_scanned += sermon_import_process_directory(
         $month_dir['dir'],
@@ -541,6 +632,7 @@ foreach ($month_dirs as $month_dir) {
         $errors,
         $debug_log,
         $existing_sermons,
+        $preacher_terms,
         $uploads_subdir,
         $post_type,
         $default_post_status,
@@ -604,6 +696,7 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
     <th>Title</th>
     <th>Sermon date</th>
     <th>Preacher</th>
+    <th>Potential issues</th>
     <?php if ($dry_run) : ?>
         <th>Status</th><th>Post type</th><th>Audio URL</th>
     <?php else : ?>
@@ -612,7 +705,7 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
 </tr></thead>
 <tbody>
 <?php if (!$imported) : ?>
-    <tr><td colspan="7">No sermons to display.</td></tr>
+    <tr><td colspan="8">No sermons to display.</td></tr>
 <?php endif; ?>
 <?php foreach ($imported as $item) : ?>
     <tr>
@@ -633,6 +726,15 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
                     <br>Matched as <?php echo sermon_import_escape($item['matched_preacher']); ?>
                 <?php elseif (!empty($item['preacher_candidates'])) : ?>
                     <br>Candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
+                <?php endif; ?>
+            </td>
+            <td>
+                <?php if (empty($item['issues'])) : ?>
+                    <span class="status status-success">None detected</span>
+                <?php else : ?>
+                    <?php foreach ($item['issues'] as $issue) : ?>
+                        <span class="status status-warning"><?php echo sermon_import_escape($issue); ?></span><br>
+                    <?php endforeach; ?>
                 <?php endif; ?>
             </td>
             <td><?php echo sermon_import_escape($item['status']); ?></td>
@@ -656,6 +758,15 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
                     <br>Candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
                 <?php endif; ?>
             </td>
+            <td>
+                <?php if (empty($item['issues'])) : ?>
+                    <span class="status status-success">None detected</span>
+                <?php else : ?>
+                    <?php foreach ($item['issues'] as $issue) : ?>
+                        <span class="status status-warning"><?php echo sermon_import_escape($issue); ?></span><br>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </td>
             <td><span class="status status-success">Imported</span></td>
             <td><?php echo (int) $item['post_id']; ?></td>
             <td><?php echo sermon_import_escape($item['post_type']); ?></td>
@@ -668,15 +779,28 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
 <h4>Skipped (<?php echo count($skipped); ?>)</h4>
 <div class="table-wrap">
 <table>
-<thead><tr><th>File</th><th>Reason</th><th>Existing post ID</th></tr></thead>
+<thead><tr><th>File</th><th>Reason</th><th>Issue indicator</th><th>Existing post ID</th></tr></thead>
 <tbody>
 <?php if (!$skipped) : ?>
-    <tr><td colspan="3">No skipped files.</td></tr>
+    <tr><td colspan="4">No skipped files.</td></tr>
 <?php endif; ?>
 <?php foreach ($skipped as $item) : ?>
     <tr>
         <td><?php echo sermon_import_escape($item['file']); ?></td>
         <td><?php echo sermon_import_escape($item['reason']); ?></td>
+        <td>
+            <?php if ($item['reason'] === 'invalid_sermon_date') : ?>
+                <span class="status status-error">Sermon date could not be extracted</span>
+            <?php elseif ($item['reason'] === 'filename_missing_sermon_title') : ?>
+                <span class="status status-error">Sermon title could not be extracted</span>
+            <?php elseif ($item['reason'] === 'filename_format_mismatch') : ?>
+                <span class="status status-error">Filename fields could not be parsed</span>
+            <?php elseif ($item['reason'] === 'already_has_sermon') : ?>
+                <span class="status status-success">Existing sermon; intentionally skipped</span>
+            <?php else : ?>
+                <span class="status status-warning">Review required</span>
+            <?php endif; ?>
+        </td>
         <td><?php echo isset($item['post_id']) ? (int) $item['post_id'] : '&mdash;'; ?></td>
     </tr>
 <?php endforeach; ?>
