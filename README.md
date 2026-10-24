@@ -28,7 +28,7 @@ preacher taxonomy, service-type taxonomy, and service term must also be availabl
 
 ## Run
 
-Open the importer URL with the secret and the first month to scan:
+Open the importer URL with the required parameters:
 
 ```text
 /wp-content/plugins/jape-sermon-import/import-sermons.php?key=YOUR_SECRET&start-at=2026-09
@@ -37,29 +37,26 @@ Open the importer URL with the secret and the first month to scan:
 The script scans `uploads/sermons/PredigtDerWoche/YYYY/MM` from `start-at`
 through the current month, inclusive. Missing month folders are ignored.
 
-### Dry run
+### URL parameters
 
-Add `dryrun=1` to preview proposed sermons without creating or changing posts:
+| Parameter | Required | Default | Description |
+| --- | --- | --- | --- |
+| `key` | Yes | — | Import secret configured as `SERMON_IMPORT_SECRET` in `wp-config.php`. |
+| `start-at` | Yes | — | First month to scan, in `YYYY-MM` format; must be `2020-01` or later. The scan continues through the current month. |
+| `dryrun` | No | `0` | Set to `1`, `true`, or `yes` to preview without creating or changing sermons. |
+| `debug` | No | `0` | Set to `1`, `true`, or `yes` to show detailed duplicate-check and WordPress post diagnostics. This may expose private site data; only use it for controlled troubleshooting. |
+| `publish` | No | `0` | Set to `1`, `true`, `yes`, or `on` to publish newly imported sermons. Otherwise they are drafts. Existing sermons are still skipped and not changed. With `dryrun=1`, this only previews the intended status. |
+| `email` | No | `0` | Set to `1`, `true`, `yes`, or `on` to email the HTML summary to the WordPress administrator email configured in Settings > General. Includes imported and errored files, lists only skipped files requiring attention, and counts existing sermons skipped as duplicates; also works with dry runs. WordPress must be configured to send mail. |
 
-```text
-...?key=YOUR_SECRET&start-at=2026-09&dryrun=1
-```
-
-The preview reports parsed fields, preacher-match status, likely setup/file
-issues, skipped files, and duplicate matches. Run a dry run before a live import.
-
-### Debug output
-
-Add `debug=1` to show duplicate-check and WordPress post diagnostics in a
-collapsed section:
+Parameters can be combined, for example:
 
 ```text
-...?key=YOUR_SECRET&start-at=2026-09&dryrun=1&debug=1
+...?key=YOUR_SECRET&start-at=2026-09&publish=1&email=1
 ```
 
-The debug report includes full post objects and metadata for matching sermons.
-It may reveal private site data; use it only for controlled troubleshooting and
-remove `debug=1` when finished.
+Run with `dryrun=1` before a live import to preview parsed fields,
+preacher-match status, likely setup/file issues, skipped files, and duplicate
+matches.
 
 ## Filename format
 
@@ -97,6 +94,5 @@ listed as skipped rather than imported again.
   server, and proxy logs.
 - Debug output contains post metadata and should not be left enabled for routine
   use.
-- Imports create draft sermons. Review and publish them from WordPress when
-  ready.
+- Imports create draft sermons unless `publish=1` is supplied.
 - Back up the site database before a live import.
