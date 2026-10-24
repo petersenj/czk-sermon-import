@@ -16,8 +16,10 @@ function sermon_import_send_summary_email($summary) {
     $site_name = wp_specialchars_decode(get_bloginfo('name'), ENT_QUOTES);
     $subject = sprintf('[%s] Sermon import summary (%s)', $site_name, $summary['start_at']);
     $action = $summary['dry_run'] ? 'Would import' : 'Imported';
-    $html = '<!doctype html><html><body style="font-family:Arial,sans-serif;color:#222;line-height:1.5;">';
-    $html .= '<h2>Sermon import summary</h2><table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;">';
+    $body = array(
+        'SERMON IMPORT SUMMARY',
+        '',
+    );
     $summary_rows = array(
         'Start at' => $summary['start_at'],
         'Month folders scanned' => $summary['month_folders'],
@@ -29,57 +31,59 @@ function sermon_import_send_summary_email($summary) {
         'Errors' => count($summary['errors']),
     );
     foreach ($summary_rows as $label => $value) {
-        $html .= '<tr><th align="left">' . esc_html($label) . '</th><td>' . esc_html($value) . '</td></tr>';
+        $body[] = $label . ': ' . $value;
     }
-    $html .= '</table>';
+    $body[] = '';
+    $body[] = $action . ' sermons';
 
-    $html .= '<h3>' . esc_html($action) . ' sermons</h3>';
     if ($summary['imported']) {
-        $html .= '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;">';
-        $html .= '<thead><tr><th align="left">File</th><th align="left">Title</th><th align="left">Date</th><th align="left">Status</th><th align="left">Issues</th></tr></thead><tbody>';
+        $item_number = 1;
         foreach ($summary['imported'] as $item) {
-            $html .= '<tr><td>' . esc_html($item['file']) . '</td>';
-            $html .= '<td>' . esc_html(isset($item['title']) ? $item['title'] : '') . '</td>';
-            $html .= '<td>' . esc_html(isset($item['sermon_date']) ? $item['sermon_date'] : '') . '</td>';
-            $html .= '<td>' . esc_html(isset($item['status']) ? $item['status'] : $summary['post_status']) . '</td>';
-            $html .= '<td>' . esc_html(!empty($item['issues']) ? implode(', ', $item['issues']) : 'None') . '</td></tr>';
+            $body[] = '';
+            $body[] = $item_number . '. ' . $item['file'];
+            $body[] = '   Title: ' . (isset($item['title']) ? $item['title'] : '');
+            $body[] = '   Date: ' . (isset($item['sermon_date']) ? $item['sermon_date'] : '');
+            $body[] = '   Status: ' . (isset($item['status']) ? $item['status'] : $summary['post_status']);
+            $body[] = '   Issues: ' . (!empty($item['issues']) ? implode(', ', $item['issues']) : 'None');
+            $item_number++;
         }
-        $html .= '</tbody></table>';
     } else {
-        $html .= '<p>None.</p>';
+        $body[] = 'None.';
     }
 
-    $html .= '<h3>Skipped files requiring attention</h3>';
+    $body[] = '';
+    $body[] = 'SKIPPED FILES REQUIRING ATTENTION';
     if ($summary['skipped']) {
-        $html .= '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;">';
-        $html .= '<thead><tr><th align="left">File</th><th align="left">Reason</th></tr></thead><tbody>';
+        $item_number = 1;
         foreach ($summary['skipped'] as $item) {
-            $html .= '<tr><td>' . esc_html($item['file']) . '</td><td>' . esc_html($item['reason']) . '</td></tr>';
+            $body[] = $item_number . '. ' . $item['file'];
+            $body[] = '   Reason: ' . $item['reason'];
+            $item_number++;
         }
-        $html .= '</tbody></table>';
     } else {
-        $html .= '<p>None.</p>';
+        $body[] = 'None.';
     }
 
-    $html .= '<h3>Errors</h3>';
+    $body[] = '';
+    $body[] = 'ERRORS';
     if ($summary['errors']) {
-        $html .= '<table cellpadding="6" cellspacing="0" border="1" style="border-collapse:collapse;width:100%;">';
-        $html .= '<thead><tr><th align="left">File</th><th align="left">Error</th></tr></thead><tbody>';
+        $item_number = 1;
         foreach ($summary['errors'] as $item) {
-            $html .= '<tr><td>' . esc_html($item['file']) . '</td><td>' . esc_html($item['reason']) . '</td></tr>';
+            $body[] = $item_number . '. ' . $item['file'];
+            $body[] = '   Error: ' . $item['reason'];
+            $item_number++;
         }
-        $html .= '</tbody></table>';
     } else {
-        $html .= '<p>None.</p>';
+        $body[] = 'None.';
     }
 
     if ($summary['dry_run']) {
-        $html .= '<p><strong>Dry run:</strong> No sermons or metadata were created or changed.</p>';
+        $body[] = '';
+        $body[] = 'Dry run: No sermons or metadata were created or changed.';
     }
-    $html .= '</body></html>';
 
-    $headers = array('Content-Type: text/html; charset=UTF-8');
-    if (!wp_mail($recipient, $subject, $html, $headers)) {
+    $headers = array('Content-Type: text/plain; charset=UTF-8');
+    if (!wp_mail($recipient, $subject, implode("\n", $body), $headers)) {
         return new WP_Error(
             'sermon_import_email_failed',
             'WordPress could not send the summary email.'
