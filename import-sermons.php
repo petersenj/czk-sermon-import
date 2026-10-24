@@ -7,6 +7,15 @@
 $uploads_subdir = 'sermons/PredigtDerWoche';
 $post_type = 'wpfc_sermon';
 $default_post_status = 'draft';
+$publish_value = isset($_GET['publish']) && is_scalar($_GET['publish'])
+    ? strtolower(trim((string) $_GET['publish']))
+    : '';
+$publish = in_array($publish_value, array('1', 'true', 'yes', 'on'), true);
+$post_status = $publish ? 'publish' : $default_post_status;
+$email_value = isset($_GET['email']) && is_scalar($_GET['email'])
+    ? strtolower(trim((string) $_GET['email']))
+    : '';
+$send_email = in_array($email_value, array('1', 'true', 'yes', 'on'), true);
 $default_author = 10;
 $post_time = '10:30:00';
 $minimum_start_at = '2020-01';
@@ -76,6 +85,8 @@ if (!hash_equals($secret_key, $provided_key)) {
     echo 'Forbidden';
     exit;
 }
+
+require_once __DIR__ . '/sermon-import-email.php';
 
 $upload_dir = wp_get_upload_dir();
 $target_dir_base = rtrim($upload_dir['basedir'], '/\\') . '/' . trim($uploads_subdir, '/\\');
@@ -514,10 +525,11 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
             continue;
         }
 
+        $creation_status = $post_status === 'publish' ? 'draft' : $post_status;
         $post_id = wp_insert_post(array(
             'post_title' => $title,
             'post_content' => '',
-            'post_status' => $post_status,
+            'post_status' => $creation_status,
             'post_author' => $author,
             'post_type' => $sermon_post_type,
             'post_date' => $post_date,
@@ -587,10 +599,29 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
             );
         }
 
+        if ($post_status === 'publish') {
+            $publish_result = wp_update_post(array(
+                'ID' => $post_id,
+                'post_status' => 'publish',
+            ), true);
+            if (is_wp_error($publish_result) || get_post_status($post_id) !== 'publish') {
+                $file_issues[] = 'Could not publish the imported sermon.';
+                $errors[] = array(
+                    'file' => $filename,
+                    'reason' => 'failed_to_publish_sermon'
+                        . (is_wp_error($publish_result) ? ': ' . $publish_result->get_error_message() : ''),
+                    'post_id' => (int) $post_id,
+                );
+            }
+        }
+
         $imported[] = array(
             'file' => $filename,
+            'title' => $title,
+            'sermon_date' => $sermon_date->format('m/d/Y'),
             'post_id' => (int) $post_id,
             'post_type' => get_post_type($post_id),
+            'status' => get_post_status($post_id),
             'preacher' => $preacher_name,
             'preacher_match' => $preacher_match['match'],
             'matched_preacher' => $preacher_match['name'],
@@ -635,12 +666,39 @@ foreach ($month_dirs as $month_dir) {
         $preacher_terms,
         $uploads_subdir,
         $post_type,
-        $default_post_status,
+        $post_status,
         $default_author,
         $post_time,
         $dry_run,
         $debug
     );
+}
+
+$intentionally_skipped = array_filter($skipped, function ($item) {
+    return isset($item['reason']) && $item['reason'] === 'already_has_sermon';
+});
+$actionable_skipped = array_filter($skipped, function ($item) {
+    return !isset($item['reason']) || $item['reason'] !== 'already_has_sermon';
+});
+$intentionally_skipped_count = count($intentionally_skipped);
+$actionable_skipped_count = count($actionable_skipped);
+
+$email_result = null;
+if ($send_email) {
+    $email_result = sermon_import_send_summary_email(array(
+        'start_at' => $start_at,
+        'month_folders' => count($month_dirs),
+        'total_scanned' => $total_scanned,
+        'imported' => $imported,
+        'skipped' => $actionable_skipped,
+        'intentionally_skipped_count' => $intentionally_skipped_count,
+        'errors' => $errors,
+        'dry_run' => $dry_run,
+        'post_status' => $post_status,
+    ));
+    if (is_wp_error($email_result)) {
+        http_response_code(500);
+    }
 }
 
 header('Content-Type: text/html; charset=utf-8');
@@ -682,10 +740,21 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
 <p><strong>Month folders scanned:</strong> <?php echo count($month_dirs); ?></p>
 <p><strong>MP3 files scanned:</strong> <?php echo (int) $total_scanned; ?></p>
 <p><strong>Existing sermons loaded:</strong> <?php echo count($existing_sermons); ?></p>
-<div class="summary<?php echo $errors ? ' summary-error' : ($skipped ? ' summary-warning' : ''); ?>">
-    <strong><?php echo $errors ? 'Completed with errors' : ($skipped ? 'Completed with skipped files' : 'Completed successfully'); ?></strong>
+<p><strong>Target post status:</strong> <?php echo sermon_import_escape($post_status); ?></p>
+<?php if ($send_email) : ?>
+<p class="summary<?php echo is_wp_error($email_result) ? ' summary-error' : ''; ?>">
+    <?php if (is_wp_error($email_result)) : ?>
+        <strong>Summary email failed:</strong> <?php echo sermon_import_escape($email_result->get_error_message()); ?>
+    <?php else : ?>
+        Summary email sent to <?php echo sermon_import_escape($email_result); ?>.
+    <?php endif; ?>
+</p>
+<?php endif; ?>
+<div class="summary<?php echo $errors ? ' summary-error' : ($actionable_skipped_count ? ' summary-warning' : ''); ?>">
+    <strong><?php echo $errors ? 'Completed with errors' : ($actionable_skipped_count ? 'Completed with skipped files' : 'Completed successfully'); ?></strong>
     &mdash; <?php echo $dry_run ? 'Would import' : 'Imported'; ?>: <?php echo count($imported); ?>,
-    skipped: <?php echo count($skipped); ?>,
+    skipped: <?php echo $actionable_skipped_count; ?>,
+    already existed (intentionally skipped): <?php echo $intentionally_skipped_count; ?>,
     errors: <?php echo count($errors); ?>.
 </div>
 <h4><?php echo $dry_run ? 'Would import' : 'Imported'; ?> (<?php echo count($imported); ?>)</h4>
@@ -700,12 +769,12 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
     <?php if ($dry_run) : ?>
         <th>Status</th><th>Post type</th><th>Audio URL</th>
     <?php else : ?>
-        <th>Result</th><th>Post ID</th><th>Post type</th>
+        <th>Result</th><th>Post ID</th><th>Post type</th><th>Status</th>
     <?php endif; ?>
 </tr></thead>
 <tbody>
 <?php if (!$imported) : ?>
-    <tr><td colspan="8">No sermons to display.</td></tr>
+    <tr><td colspan="<?php echo $dry_run ? 8 : 9; ?>">No sermons to display.</td></tr>
 <?php endif; ?>
 <?php foreach ($imported as $item) : ?>
     <tr>
@@ -770,21 +839,22 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
             <td><span class="status status-success">Imported</span></td>
             <td><?php echo (int) $item['post_id']; ?></td>
             <td><?php echo sermon_import_escape($item['post_type']); ?></td>
+            <td><?php echo sermon_import_escape($item['status']); ?></td>
         <?php endif; ?>
     </tr>
 <?php endforeach; ?>
 </tbody>
 </table>
 </div>
-<h4>Skipped (<?php echo count($skipped); ?>)</h4>
+<h4>Skipped files requiring attention (<?php echo $actionable_skipped_count; ?>)</h4>
 <div class="table-wrap">
 <table>
 <thead><tr><th>File</th><th>Reason</th><th>Issue indicator</th><th>Existing post ID</th></tr></thead>
 <tbody>
-<?php if (!$skipped) : ?>
-    <tr><td colspan="4">No skipped files.</td></tr>
+<?php if (!$actionable_skipped_count) : ?>
+    <tr><td colspan="4">No files requiring attention.</td></tr>
 <?php endif; ?>
-<?php foreach ($skipped as $item) : ?>
+<?php foreach ($actionable_skipped as $item) : ?>
     <tr>
         <td><?php echo sermon_import_escape($item['file']); ?></td>
         <td><?php echo sermon_import_escape($item['reason']); ?></td>
@@ -795,8 +865,6 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
                 <span class="status status-error">Sermon title could not be extracted</span>
             <?php elseif ($item['reason'] === 'filename_format_mismatch') : ?>
                 <span class="status status-error">Filename fields could not be parsed</span>
-            <?php elseif ($item['reason'] === 'already_has_sermon') : ?>
-                <span class="status status-success">Existing sermon; intentionally skipped</span>
             <?php else : ?>
                 <span class="status status-warning">Review required</span>
             <?php endif; ?>
