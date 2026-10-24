@@ -50,7 +50,6 @@ function sermon_import_run_scheduled_import() {
     $start_at = $start_at->modify('-1 month')->format('Y-m');
     $url = add_query_arg(
         array(
-            'key' => $secret_key,
             'start-at' => $start_at,
             'dryrun' => '0',
             'publish' => '1',
@@ -60,6 +59,9 @@ function sermon_import_run_scheduled_import() {
     );
 
     $response = wp_remote_get($url, array(
+        'headers' => array(
+            'X-Sermon-Import-Key' => $secret_key,
+        ),
         'timeout' => 300,
         'redirection' => 0,
     ));

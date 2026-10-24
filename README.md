@@ -41,7 +41,7 @@ through the current month, inclusive. Missing month folders are ignored.
 
 | Parameter | Required | Default | Description |
 | --- | --- | --- | --- |
-| `key` | Yes | — | Import secret configured as `SERMON_IMPORT_SECRET` in `wp-config.php`. |
+| `key` | Only when not using the header | — | Import secret configured as `SERMON_IMPORT_SECRET` in `wp-config.php`. Prefer the `X-Sermon-Import-Key` HTTP header so the secret is not included in the URL. |
 | `start-at` | Yes | — | First month to scan, in `YYYY-MM` format; must be `2020-01` or later. The scan continues through the current month. |
 | `dryrun` | No | `1` | Runs as a preview by default. Set to `0`, `false`, `no`, or `off` to create sermons. |
 | `debug` | No | `0` | Set to `1`, `true`, or `yes` to show detailed duplicate-check and WordPress post diagnostics. This may expose private site data; only use it for controlled troubleshooting. |
@@ -57,15 +57,18 @@ Parameters can be combined, for example:
 The example explicitly disables dry-run mode to run a live import. For safety,
 requests without `dryrun=0` preview parsed fields, preacher-match status, likely
 setup/file issues, skipped files, and duplicate matches without creating or
-changing sermons.
+changing sermons. The `key` query parameter is retained for manual use, but
+URLs can be recorded in web-server and proxy logs; use the
+`X-Sermon-Import-Key` header for automated requests.
 
 ## Automatic weekly run
 
 To run the importer automatically, activate **Sermon Import Scheduler** in
 WordPress under Plugins. Keep `SERMON_IMPORT_SECRET` defined in `wp-config.php`.
 The scheduler requests the importer every Monday at 06:00 in the WordPress
-timezone. It imports and publishes new sermons, scans the previous and current
-month, and emails the summary to the WordPress administrator.
+timezone. It sends the import key in an HTTP header, imports and publishes new
+sermons, scans the previous and current month, and emails the summary to the
+WordPress administrator.
 
 WordPress Cron runs due events when the site receives a request, so a quiet site
 may run the import later than 06:00. For a more exact schedule, configure a

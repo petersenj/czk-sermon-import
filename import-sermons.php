@@ -1,6 +1,7 @@
 <?php
 // Scans uploads/sermons/PredigtDerWoche/<YEAR>/<MONTH> from start-at through
-// the current month. Call with ?key=SECRET&start-at=YYYY-MM.
+// the current month. Prefer X-Sermon-Import-Key for authentication; ?key=SECRET
+// remains available for manual runs.
 // Runs as a dry run unless &dryrun=0 is explicitly supplied.
 // Date, preacher, and title may be separated by underscores or hyphens.
 
@@ -79,7 +80,9 @@ if (!is_string($secret_key) || $secret_key === '') {
     exit;
 }
 
-$provided_key = isset($_GET['key']) ? (string) $_GET['key'] : '';
+$provided_key = isset($_SERVER['HTTP_X_SERMON_IMPORT_KEY'])
+    ? (string) $_SERVER['HTTP_X_SERMON_IMPORT_KEY']
+    : (isset($_GET['key']) ? (string) $_GET['key'] : '');
 if (!hash_equals($secret_key, $provided_key)) {
     http_response_code(403);
     echo 'Forbidden';
