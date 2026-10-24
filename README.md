@@ -59,6 +59,19 @@ requests without `dryrun=0` preview parsed fields, preacher-match status, likely
 setup/file issues, skipped files, and duplicate matches without creating or
 changing sermons.
 
+## Automatic weekly run
+
+To run the importer automatically, activate **Sermon Import Scheduler** in
+WordPress under Plugins. Keep `SERMON_IMPORT_SECRET` defined in `wp-config.php`.
+The scheduler requests the importer every Monday at 06:00 in the WordPress
+timezone. It imports and publishes new sermons, scans the previous and current
+month, and emails the summary to the WordPress administrator.
+
+WordPress Cron runs due events when the site receives a request, so a quiet site
+may run the import later than 06:00. For a more exact schedule, configure a
+server cron to trigger WordPress Cron regularly. Deactivate the scheduler plugin
+to stop the weekly run.
+
 ## Filename format
 
 The expected pattern is:
