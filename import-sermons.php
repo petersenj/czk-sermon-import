@@ -510,6 +510,10 @@ function sermon_import_process_directory($dirpath, $dirurl, &$imported, &$skippe
             'file' => $filename,
             'post_id' => (int) $post_id,
             'post_type' => get_post_type($post_id),
+            'preacher' => $preacher_name,
+            'preacher_match' => $preacher_match['match'],
+            'matched_preacher' => $preacher_match['name'],
+            'preacher_candidates' => $preacher_match['candidates'],
         );
     }
 
@@ -554,41 +558,60 @@ function sermon_import_escape($value) {
 ?>
 <!doctype html>
 <html>
-<head><meta charset="utf-8"><title>Sermon Import Summary</title></head>
+<head>
+<meta charset="utf-8">
+<title>Sermon Import Summary</title>
+<style>
+body { font: 16px/1.5 sans-serif; margin: 2rem; color: #222; }
+.summary { padding: 1rem; border-left: 5px solid #2271b1; background: #f0f6fc; }
+.summary-warning { border-color: #996800; background: #fcf9e8; color: #6d4c00; }
+.summary-error { border-color: #b32d2e; background: #fcf0f1; color: #8a2424; }
+.status { display: inline-block; padding: .1rem .45rem; border-radius: 3px; font-weight: 600; }
+.status-success { color: #14532d; background: #dcfce7; }
+.status-warning { color: #713f12; background: #fef3c7; }
+.status-error { color: #7f1d1d; background: #fee2e2; }
+.error-list { border-left: 4px solid #b32d2e; padding: .75rem 1rem .75rem 2rem; background: #fcf0f1; }
+.debug-output { margin-top: 1.5rem; padding: .75rem; border: 1px solid #8c8f94; }
+.debug-output > summary { cursor: pointer; font-weight: 700; }
+pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
+</style>
+</head>
 <body>
 <h3>Sermon Import Summary</h3>
 <?php if ($dry_run) : ?>
-<p><strong>DRY RUN:</strong> No sermons or metadata were created or changed.</p>
+<p class="summary summary-warning"><strong>DRY RUN:</strong> No sermons or metadata were created or changed.</p>
 <?php endif; ?>
 <p><strong>Start at:</strong> <?php echo sermon_import_escape($start_at); ?></p>
-<?php if ($debug) : ?>
-<p><strong>Debug:</strong> Duplicate-check diagnostics are enabled.</p>
-<?php endif; ?>
 <p><strong>Month folders scanned:</strong> <?php echo count($month_dirs); ?></p>
 <p><strong>MP3 files scanned:</strong> <?php echo (int) $total_scanned; ?></p>
 <p><strong>Existing sermons loaded:</strong> <?php echo count($existing_sermons); ?></p>
-<?php if ($debug) : ?>
-<p><strong>Received post type:</strong> <?php echo sermon_import_escape(var_export($query_diagnostics['received_post_type'], true)); ?></p>
-<p><strong>Effective post type:</strong> <?php echo sermon_import_escape($query_diagnostics['effective_post_type']); ?></p>
-<p><strong>Post type registered:</strong> <?php echo $query_diagnostics['registered_post_type'] ? 'yes' : 'no'; ?></p>
-<p><strong>Direct database matches:</strong> <?php echo (int) $query_diagnostics['database_matching_count']; ?></p>
-<p><strong>Matches in sermon-date range:</strong> <?php echo count($existing_sermons); ?></p>
-<?php endif; ?>
-<p><strong><?php echo $dry_run ? 'Would import' : 'Imported'; ?>:</strong> <?php echo count($imported); ?></p>
+<div class="summary<?php echo $errors ? ' summary-error' : ($skipped ? ' summary-warning' : ''); ?>">
+    <strong><?php echo $errors ? 'Completed with errors' : ($skipped ? 'Completed with skipped files' : 'Completed successfully'); ?></strong>
+    &mdash; <?php echo $dry_run ? 'Would import' : 'Imported'; ?>: <?php echo count($imported); ?>,
+    skipped: <?php echo count($skipped); ?>,
+    errors: <?php echo count($errors); ?>.
+</div>
+<h4><?php echo $dry_run ? 'Would import' : 'Imported'; ?> (<?php echo count($imported); ?>)</h4>
 <ul>
 <?php foreach ($imported as $item) : ?>
     <li>
         <?php echo sermon_import_escape($item['file']); ?>
+        <?php if (isset($item['preacher_match']) && $item['preacher_match'] === 'not_found') : ?>
+            <span class="status status-warning">Preacher not found</span>
+        <?php elseif (isset($item['preacher_match']) && $item['preacher_match'] === 'ambiguous') : ?>
+            <span class="status status-error">Preacher match ambiguous</span>
+        <?php elseif (isset($item['preacher_match'])) : ?>
+            <span class="status status-success">Preacher <?php echo sermon_import_escape($item['preacher_match']); ?></span>
+        <?php endif; ?>
         <?php if ($dry_run) : ?>
             &mdash; title: <?php echo sermon_import_escape($item['title']); ?>;
             date: <?php echo sermon_import_escape($item['sermon_date']); ?>;
             preacher: <?php echo sermon_import_escape($item['preacher']); ?>
-            (<?php echo sermon_import_escape($item['preacher_match']); ?>
             <?php if ($item['matched_preacher'] !== '') : ?>
-                as <?php echo sermon_import_escape($item['matched_preacher']); ?>
+                &mdash; matched as <?php echo sermon_import_escape($item['matched_preacher']); ?>
             <?php elseif (!empty($item['preacher_candidates'])) : ?>
-                candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
-            <?php endif; ?>);
+                &mdash; candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
+            <?php endif; ?>
             status: <?php echo sermon_import_escape($item['status']); ?>;
             audio: <?php echo sermon_import_escape($item['audio_url']); ?>
         <?php else : ?>
@@ -598,13 +621,15 @@ function sermon_import_escape($value) {
     </li>
 <?php endforeach; ?>
 </ul>
-<p><strong>Skipped:</strong> <?php echo count($skipped); ?></p>
+<h4>Skipped (<?php echo count($skipped); ?>)</h4>
 <ul>
 <?php foreach ($skipped as $item) : ?>
     <li><?php echo sermon_import_escape($item['file']); ?> &mdash; <?php echo sermon_import_escape($item['reason']); ?><?php echo isset($item['post_id']) ? ' (post ' . (int) $item['post_id'] . ')' : ''; ?></li>
 <?php endforeach; ?>
 </ul>
 <?php if ($debug) : ?>
+<details class="debug-output">
+<summary>Debug output (expand for diagnostics and sermon data)</summary>
 <h4>Post type query diagnostics</h4>
 <pre><?php
 $query_diagnostic_dump = array(
@@ -678,12 +703,17 @@ echo sermon_import_escape($query_dump_output);
     $dump_output = ob_get_clean();
     ?>
     <pre><?php echo sermon_import_escape($dump_output); ?></pre>
-    <?php endif; ?>
-<p><strong>Errors:</strong> <?php echo count($errors); ?></p>
-<ul>
+    </details>
+<?php endif; ?>
+<h4>Errors (<?php echo count($errors); ?>)</h4>
+<?php if ($errors) : ?>
+<ul class="error-list">
 <?php foreach ($errors as $item) : ?>
     <li><?php echo sermon_import_escape($item['file']); ?> &mdash; <?php echo sermon_import_escape($item['reason']); ?></li>
 <?php endforeach; ?>
 </ul>
+<?php else : ?>
+<p>No errors.</p>
+<?php endif; ?>
 </body>
 </html>
