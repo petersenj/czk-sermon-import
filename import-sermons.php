@@ -8,7 +8,7 @@ $post_type = 'wpfc_sermon';
 $default_post_status = 'draft';
 $default_author = 1;
 $post_time = '10:30:00';
-$minimum_start_at = '2025-07';
+$minimum_start_at = '2020-01';
 $dry_run_value = isset($_GET['dryrun']) && is_scalar($_GET['dryrun'])
     ? strtolower((string) $_GET['dryrun'])
     : '';
@@ -23,7 +23,7 @@ header('Content-Type: text/plain; charset=utf-8');
 $start_at = isset($_GET['start-at']) ? trim((string) $_GET['start-at']) : '';
 if (!preg_match('/^\d{4}-\d{2}$/', $start_at)) {
     http_response_code(400);
-    echo 'Missing or invalid start-at parameter. Provide ?start-at=YYYY-MM (e.g. 2025-07).';
+    echo 'Missing or invalid start-at parameter. Provide ?start-at=YYYY-MM (e.g. '. $minimum_start_at . ').';
     exit;
 }
 
@@ -573,6 +573,11 @@ body { font: 16px/1.5 sans-serif; margin: 2rem; color: #222; }
 .error-list { border-left: 4px solid #b32d2e; padding: .75rem 1rem .75rem 2rem; background: #fcf0f1; }
 .debug-output { margin-top: 1.5rem; padding: .75rem; border: 1px solid #8c8f94; }
 .debug-output > summary { cursor: pointer; font-weight: 700; }
+table { width: 100%; border-collapse: collapse; margin: 1rem 0 1.5rem; }
+th, td { border: 1px solid #c3c4c7; padding: .55rem .7rem; text-align: left; vertical-align: top; }
+th { background: #f0f0f1; }
+tbody tr:nth-child(even) { background: #f6f7f7; }
+.table-wrap { overflow-x: auto; }
 pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
 </style>
 </head>
@@ -592,41 +597,92 @@ pre { overflow: auto; padding: 1rem; background: #f6f7f7; }
     errors: <?php echo count($errors); ?>.
 </div>
 <h4><?php echo $dry_run ? 'Would import' : 'Imported'; ?> (<?php echo count($imported); ?>)</h4>
-<ul>
+<div class="table-wrap">
+<table>
+<thead><tr>
+    <th>File</th>
+    <th>Title</th>
+    <th>Sermon date</th>
+    <th>Preacher</th>
+    <?php if ($dry_run) : ?>
+        <th>Status</th><th>Post type</th><th>Audio URL</th>
+    <?php else : ?>
+        <th>Result</th><th>Post ID</th><th>Post type</th>
+    <?php endif; ?>
+</tr></thead>
+<tbody>
+<?php if (!$imported) : ?>
+    <tr><td colspan="7">No sermons to display.</td></tr>
+<?php endif; ?>
 <?php foreach ($imported as $item) : ?>
-    <li>
-        <?php echo sermon_import_escape($item['file']); ?>
+    <tr>
+        <td><?php echo sermon_import_escape($item['file']); ?></td>
+        <?php if ($dry_run) : ?>
+            <td><?php echo sermon_import_escape($item['title']); ?></td>
+            <td><?php echo sermon_import_escape($item['sermon_date']); ?></td>
+            <td>
+                <?php echo sermon_import_escape($item['preacher']); ?>
         <?php if (isset($item['preacher_match']) && $item['preacher_match'] === 'not_found') : ?>
             <span class="status status-warning">Preacher not found</span>
         <?php elseif (isset($item['preacher_match']) && $item['preacher_match'] === 'ambiguous') : ?>
             <span class="status status-error">Preacher match ambiguous</span>
         <?php elseif (isset($item['preacher_match'])) : ?>
-            <span class="status status-success">Preacher <?php echo sermon_import_escape($item['preacher_match']); ?></span>
+            <span class="status status-success"><?php echo sermon_import_escape($item['preacher_match']); ?></span>
         <?php endif; ?>
-        <?php if ($dry_run) : ?>
-            &mdash; title: <?php echo sermon_import_escape($item['title']); ?>;
-            date: <?php echo sermon_import_escape($item['sermon_date']); ?>;
-            preacher: <?php echo sermon_import_escape($item['preacher']); ?>
-            <?php if ($item['matched_preacher'] !== '') : ?>
-                &mdash; matched as <?php echo sermon_import_escape($item['matched_preacher']); ?>
-            <?php elseif (!empty($item['preacher_candidates'])) : ?>
-                &mdash; candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
-            <?php endif; ?>
-            status: <?php echo sermon_import_escape($item['status']); ?>;
-            audio: <?php echo sermon_import_escape($item['audio_url']); ?>
+                <?php if ($item['matched_preacher'] !== '') : ?>
+                    <br>Matched as <?php echo sermon_import_escape($item['matched_preacher']); ?>
+                <?php elseif (!empty($item['preacher_candidates'])) : ?>
+                    <br>Candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
+                <?php endif; ?>
+            </td>
+            <td><?php echo sermon_import_escape($item['status']); ?></td>
+            <td><?php echo sermon_import_escape($item['post_type']); ?></td>
+            <td><?php echo sermon_import_escape($item['audio_url']); ?></td>
         <?php else : ?>
-            &mdash; post ID <?php echo (int) $item['post_id']; ?>
-            (<?php echo sermon_import_escape($item['post_type']); ?>)
+            <td><?php echo sermon_import_escape($item['title']); ?></td>
+            <td><?php echo sermon_import_escape($item['sermon_date']); ?></td>
+            <td>
+                <?php echo sermon_import_escape(isset($item['preacher']) ? $item['preacher'] : ''); ?>
+                <?php if (isset($item['preacher_match']) && $item['preacher_match'] === 'not_found') : ?>
+                    <span class="status status-warning">Preacher not found</span>
+                <?php elseif (isset($item['preacher_match']) && $item['preacher_match'] === 'ambiguous') : ?>
+                    <span class="status status-error">Preacher match ambiguous</span>
+                <?php elseif (isset($item['preacher_match'])) : ?>
+                    <span class="status status-success"><?php echo sermon_import_escape($item['preacher_match']); ?></span>
+                <?php endif; ?>
+                <?php if (!empty($item['matched_preacher'])) : ?>
+                    <br>Matched as <?php echo sermon_import_escape($item['matched_preacher']); ?>
+                <?php elseif (!empty($item['preacher_candidates'])) : ?>
+                    <br>Candidates: <?php echo sermon_import_escape(implode(', ', $item['preacher_candidates'])); ?>
+                <?php endif; ?>
+            </td>
+            <td><span class="status status-success">Imported</span></td>
+            <td><?php echo (int) $item['post_id']; ?></td>
+            <td><?php echo sermon_import_escape($item['post_type']); ?></td>
         <?php endif; ?>
-    </li>
+    </tr>
 <?php endforeach; ?>
-</ul>
+</tbody>
+</table>
+</div>
 <h4>Skipped (<?php echo count($skipped); ?>)</h4>
-<ul>
+<div class="table-wrap">
+<table>
+<thead><tr><th>File</th><th>Reason</th><th>Existing post ID</th></tr></thead>
+<tbody>
+<?php if (!$skipped) : ?>
+    <tr><td colspan="3">No skipped files.</td></tr>
+<?php endif; ?>
 <?php foreach ($skipped as $item) : ?>
-    <li><?php echo sermon_import_escape($item['file']); ?> &mdash; <?php echo sermon_import_escape($item['reason']); ?><?php echo isset($item['post_id']) ? ' (post ' . (int) $item['post_id'] . ')' : ''; ?></li>
+    <tr>
+        <td><?php echo sermon_import_escape($item['file']); ?></td>
+        <td><?php echo sermon_import_escape($item['reason']); ?></td>
+        <td><?php echo isset($item['post_id']) ? (int) $item['post_id'] : '&mdash;'; ?></td>
+    </tr>
 <?php endforeach; ?>
-</ul>
+</tbody>
+</table>
+</div>
 <?php if ($debug) : ?>
 <details class="debug-output">
 <summary>Debug output (expand for diagnostics and sermon data)</summary>
@@ -660,58 +716,75 @@ echo sermon_import_escape($query_dump_output);
         <?php if (empty($entry['candidates'])) : ?>
             <p>No existing sermon had the same filename.</p>
         <?php else : ?>
-            <ul>
+            <div class="table-wrap">
+            <table>
+            <thead><tr><th>Post</th><th>Post date</th><th>Sermon date</th><th>Stored audio</th><th>Normalized path</th><th>Same filename</th><th>Path match</th></tr></thead>
+            <tbody>
             <?php foreach ($entry['candidates'] as $candidate) : ?>
-                <li>
-                    post <?php echo (int) $candidate['post_id']; ?>
-                    (<?php echo sermon_import_escape($candidate['title']); ?>):
-                    date: <?php echo sermon_import_escape($candidate['post_date']); ?>;
-                    sermon_date: <?php echo sermon_import_escape($candidate['sermon_date']); ?>;
-                    stored audio: <?php echo sermon_import_escape($candidate['stored_audio']); ?>;
-                    normalized: <?php echo sermon_import_escape($candidate['normalized_path']); ?>;
-                    same filename: <?php echo $candidate['same_filename'] ? 'yes' : 'no'; ?>;
-                    path match: <?php echo $candidate['path_match'] ? 'yes' : 'no'; ?>
-                </li>
+                <tr>
+                    <td><?php echo (int) $candidate['post_id']; ?> &mdash; <?php echo sermon_import_escape($candidate['title']); ?></td>
+                    <td><?php echo sermon_import_escape($candidate['post_date']); ?></td>
+                    <td><?php echo sermon_import_escape($candidate['sermon_date']); ?></td>
+                    <td><?php echo sermon_import_escape($candidate['stored_audio']); ?></td>
+                    <td><?php echo sermon_import_escape($candidate['normalized_path']); ?></td>
+                    <td><?php echo $candidate['same_filename'] ? 'Yes' : 'No'; ?></td>
+                    <td><?php echo $candidate['path_match'] ? 'Yes' : 'No'; ?></td>
+                </tr>
             <?php endforeach; ?>
-            </ul>
+            </tbody>
+            </table>
+            </div>
         <?php endif; ?>
     </details>
 <?php endforeach; ?>
     <h4>Existing sermons (filtered by sermon_date from start-at through current month)</h4>
-    <?php
-    $existing_sermon_dump = array();
-    foreach ($existing_sermons as $sermon) {
-        $existing_sermon_dump[] = array(
-            'post_object' => $sermon['post_object'],
-            'all_post_meta' => $sermon['all_post_meta'],
-            'taxonomy_terms' => $sermon['taxonomy_terms'],
-            'ID' => $sermon['id'],
-            'post_title' => $sermon['title'],
-            'post_type' => $sermon['post_type'],
-            'post_status' => $sermon['post_status'],
-            'post_date' => $sermon['post_date'],
-            'sermon_date' => $sermon['sermon_date'],
-            'parsed_sermon_date' => $sermon['parsed_sermon_date'],
-            'sermon_date_in_range' => $sermon['sermon_date_in_range'],
-            'sermon_audio' => $sermon['audio_url'],
-            'audio_related_meta' => $sermon['audio_related_meta'],
-            'normalized_audio_path' => $sermon['normalized_audio_path'],
-        );
-    }
-    ob_start();
-    var_dump($existing_sermon_dump);
-    $dump_output = ob_get_clean();
-    ?>
-    <pre><?php echo sermon_import_escape($dump_output); ?></pre>
+    <div class="table-wrap">
+    <table>
+    <thead><tr><th>ID</th><th>Title</th><th>Status</th><th>Post date</th><th>Sermon date</th><th>Audio path</th><th>Normalized path</th><th>Full data</th></tr></thead>
+    <tbody>
+    <?php if (!$existing_sermons) : ?>
+        <tr><td colspan="8">No existing sermons in this sermon-date range.</td></tr>
+    <?php endif; ?>
+    <?php foreach ($existing_sermons as $sermon) : ?>
+        <tr>
+            <td><?php echo (int) $sermon['id']; ?></td>
+            <td><?php echo sermon_import_escape($sermon['title']); ?></td>
+            <td><?php echo sermon_import_escape($sermon['post_status']); ?></td>
+            <td><?php echo sermon_import_escape($sermon['post_date']); ?></td>
+            <td><?php echo sermon_import_escape($sermon['sermon_date']); ?><?php if ($sermon['parsed_sermon_date'] !== '') : ?><br><?php echo sermon_import_escape($sermon['parsed_sermon_date']); ?><?php endif; ?></td>
+            <td><?php echo sermon_import_escape($sermon['audio_url']); ?></td>
+            <td><?php echo sermon_import_escape($sermon['normalized_audio_path']); ?></td>
+            <td>
+                <?php ob_start(); var_dump(array(
+                    'post_object' => $sermon['post_object'],
+                    'all_post_meta' => $sermon['all_post_meta'],
+                    'taxonomy_terms' => $sermon['taxonomy_terms'],
+                )); $sermon_dump = ob_get_clean(); ?>
+                <details><summary>View</summary><pre><?php echo sermon_import_escape($sermon_dump); ?></pre></details>
+            </td>
+        </tr>
+    <?php endforeach; ?>
+    </tbody>
+    </table>
+    </div>
     </details>
 <?php endif; ?>
 <h4>Errors (<?php echo count($errors); ?>)</h4>
 <?php if ($errors) : ?>
-<ul class="error-list">
+<div class="table-wrap">
+<table class="error-list">
+<thead><tr><th>File</th><th>Error</th><th>Post ID</th></tr></thead>
+<tbody>
 <?php foreach ($errors as $item) : ?>
-    <li><?php echo sermon_import_escape($item['file']); ?> &mdash; <?php echo sermon_import_escape($item['reason']); ?></li>
+    <tr>
+        <td><?php echo sermon_import_escape($item['file']); ?></td>
+        <td><?php echo sermon_import_escape($item['reason']); ?></td>
+        <td><?php echo isset($item['post_id']) ? (int) $item['post_id'] : '&mdash;'; ?></td>
+    </tr>
 <?php endforeach; ?>
-</ul>
+</tbody>
+</table>
+</div>
 <?php else : ?>
 <p>No errors.</p>
 <?php endif; ?>
