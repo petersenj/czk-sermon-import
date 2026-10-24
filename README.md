@@ -4,17 +4,6 @@ This WordPress utility scans sermon MP3s on the server and creates missing
 `wpfc_sermon` entries. It stores a path to the existing file in `sermon_audio`;
 it does not upload or create a Media Library attachment.
 
-## File layout
-
-- `import-sermons.php` validates the request, loads WordPress, scans month
-  folders, and coordinates the import.
-- `includes/config.php` contains the importer settings.
-- `includes/importer.php` contains filename parsing, preacher matching,
-  duplicate detection, and sermon creation.
-- `includes/summary.php` renders the import results and optional diagnostics.
-
-Keep these files together when deploying the importer.
-
 ## Setup
 
 1. Place the importer folder inside the WordPress installation so the entry
