@@ -1,7 +1,7 @@
 <?php
 // Scans uploads/sermons/PredigtDerWoche/<YEAR>/<MONTH> from start-at through
 // the current month. Call with ?key=SECRET&start-at=YYYY-MM.
-// Add &dryrun=1 to preview without creating or changing sermons.
+// Runs as a dry run unless &dryrun=0 is explicitly supplied.
 // Date, preacher, and title may be separated by underscores or hyphens.
 
 $uploads_subdir = 'sermons/PredigtDerWoche';
@@ -20,9 +20,9 @@ $default_author = 10;
 $post_time = '10:30:00';
 $minimum_start_at = '2020-01';
 $dry_run_value = isset($_GET['dryrun']) && is_scalar($_GET['dryrun'])
-    ? strtolower((string) $_GET['dryrun'])
+    ? strtolower(trim((string) $_GET['dryrun']))
     : '';
-$dry_run = in_array($dry_run_value, array('1', 'true', 'yes'), true);
+$dry_run = !in_array($dry_run_value, array('0', 'false', 'no', 'off'), true);
 $debug_value = isset($_GET['debug']) && is_scalar($_GET['debug'])
     ? strtolower((string) $_GET['debug'])
     : '';

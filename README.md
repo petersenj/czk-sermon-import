@@ -43,7 +43,7 @@ through the current month, inclusive. Missing month folders are ignored.
 | --- | --- | --- | --- |
 | `key` | Yes | — | Import secret configured as `SERMON_IMPORT_SECRET` in `wp-config.php`. |
 | `start-at` | Yes | — | First month to scan, in `YYYY-MM` format; must be `2020-01` or later. The scan continues through the current month. |
-| `dryrun` | No | `0` | Set to `1`, `true`, or `yes` to preview without creating or changing sermons. |
+| `dryrun` | No | `1` | Runs as a preview by default. Set to `0`, `false`, `no`, or `off` to create sermons. |
 | `debug` | No | `0` | Set to `1`, `true`, or `yes` to show detailed duplicate-check and WordPress post diagnostics. This may expose private site data; only use it for controlled troubleshooting. |
 | `publish` | No | `0` | Set to `1`, `true`, `yes`, or `on` to publish newly imported sermons. Otherwise they are drafts. Existing sermons are still skipped and not changed. With `dryrun=1`, this only previews the intended status. |
 | `email` | No | `0` | Set to `1`, `true`, `yes`, or `on` to email the HTML summary to the WordPress administrator email configured in Settings > General. Includes imported and errored files, lists only skipped files requiring attention, and counts existing sermons skipped as duplicates; also works with dry runs. WordPress must be configured to send mail. |
@@ -51,12 +51,13 @@ through the current month, inclusive. Missing month folders are ignored.
 Parameters can be combined, for example:
 
 ```text
-...?key=YOUR_SECRET&start-at=2026-09&publish=1&email=1
+...?key=YOUR_SECRET&start-at=2026-09&dryrun=0&publish=1&email=1
 ```
 
-Run with `dryrun=1` before a live import to preview parsed fields,
-preacher-match status, likely setup/file issues, skipped files, and duplicate
-matches.
+The example explicitly disables dry-run mode to run a live import. For safety,
+requests without `dryrun=0` preview parsed fields, preacher-match status, likely
+setup/file issues, skipped files, and duplicate matches without creating or
+changing sermons.
 
 ## Filename format
 
