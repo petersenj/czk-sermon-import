@@ -10,6 +10,18 @@ if (!defined('ABSPATH')) {
 }
 
 define('SERMON_IMPORT_SCHEDULE_HOOK', 'sermon_import_scheduled_run');
+define('SERMON_IMPORT_TEST_SCHEDULE_HOOK', 'sermon_import_test_run');
+define('SERMON_IMPORT_TEST_OPTION', 'sermon_import_test_run_scheduled');
+
+function sermon_import_add_weekly_schedule($schedules) {
+    $schedules['sermon_import_weekly'] = array(
+        'interval' => WEEK_IN_SECONDS,
+        'display' => 'Once Weekly',
+    );
+    return $schedules;
+}
+
+add_filter('cron_schedules', 'sermon_import_add_weekly_schedule');
 
 function sermon_import_schedule_next_run() {
     if (wp_next_scheduled(SERMON_IMPORT_SCHEDULE_HOOK)) {
@@ -17,12 +29,12 @@ function sermon_import_schedule_next_run() {
     }
 
     $now = new DateTimeImmutable('now', wp_timezone());
-    $next_run = $now->modify('monday this week')->setTime(6, 0, 0);
+    $next_run = $now->modify('monday this week')->setTime(3, 0, 0);
     if ($next_run <= $now) {
         $next_run = $next_run->modify('+1 week');
     }
 
-    if (!wp_schedule_event($next_run->getTimestamp(), 'weekly', SERMON_IMPORT_SCHEDULE_HOOK)) {
+    if (!wp_schedule_event($next_run->getTimestamp(), 'sermon_import_weekly', SERMON_IMPORT_SCHEDULE_HOOK)) {
         error_log('Sermon importer: could not schedule the weekly import.');
     }
 }
@@ -31,10 +43,17 @@ register_activation_hook(__FILE__, 'sermon_import_schedule_next_run');
 
 function sermon_import_clear_scheduled_run() {
     wp_clear_scheduled_hook(SERMON_IMPORT_SCHEDULE_HOOK);
+    sermon_import_clear_test_run();
+}
+
+function sermon_import_clear_test_run() {
+    wp_clear_scheduled_hook(SERMON_IMPORT_TEST_SCHEDULE_HOOK);
+    delete_option(SERMON_IMPORT_TEST_OPTION);
 }
 
 register_deactivation_hook(__FILE__, 'sermon_import_clear_scheduled_run');
 add_action('init', 'sermon_import_schedule_next_run');
+add_action('init', 'sermon_import_clear_test_run');
 add_action(SERMON_IMPORT_SCHEDULE_HOOK, 'sermon_import_run_scheduled_import');
 
 function sermon_import_run_scheduled_import() {

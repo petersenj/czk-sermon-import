@@ -65,15 +65,17 @@ URLs can be recorded in web-server and proxy logs; use the
 
 To run the importer automatically, activate **Sermon Import Scheduler** in
 WordPress under Plugins. Keep `SERMON_IMPORT_SECRET` defined in `wp-config.php`.
-The scheduler requests the importer every Monday at 06:00 in the WordPress
-timezone. It sends the import key in an HTTP header, imports and publishes new
-sermons, scans the previous and current month, and emails the summary to the
-WordPress administrator.
+The scheduler requests the importer every Monday at 03:00 in the WordPress
+timezone using a registered weekly WordPress Cron interval. It sends the import
+key in an HTTP header, imports and publishes new sermons, scans the previous and
+current month, and emails the summary to the WordPress administrator.
 
 WordPress Cron runs due events when the site receives a request, so a quiet site
-may run the import later than 06:00. For a more exact schedule, configure a
+may run the import later than 03:00. For a more exact schedule, configure a
 server cron to trigger WordPress Cron regularly. Deactivate the scheduler plugin
 to stop the weekly run.
+
+Debug cron with wp crontrol plugin.
 
 ## Filename format
 
